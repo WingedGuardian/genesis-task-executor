@@ -134,9 +134,10 @@ class TaskExecutor:
 
         # --- REVIEWING ---
         if not is_resume:
+            await self._transition(task_id, TaskPhase.REVIEWING)
+
             if plan is None:
                 # Generate plan
-                await self._transition(task_id, TaskPhase.REVIEWING)
                 plan = await self._generate_plan(description)
                 if plan is None:
                     await self._fail_task(task_id, "Plan generation failed")
@@ -401,19 +402,29 @@ class TaskExecutor:
     # ----- Pause/cancel -----
 
     async def _check_pause(self, task_id: str) -> bool:
-        """Check if task should pause. Returns True if paused."""
+        """Check if task should pause. Returns True if cancelled during pause."""
         evt = self._pause_event.get(task_id)
         if evt and evt.is_set():
             await self._transition(task_id, TaskPhase.PAUSED)
             # Release semaphore so another task can run
             self._semaphore.release()
             self._semaphore_released.add(task_id)
-            # Wait for resume
-            while evt.is_set():
-                await asyncio.sleep(1)
-            # Re-acquire semaphore
-            await self._semaphore.acquire()
-            self._semaphore_released.discard(task_id)
+            try:
+                # Wait for resume or cancel
+                while evt.is_set():
+                    cancel = self._cancel_event.get(task_id)
+                    if cancel and cancel.is_set():
+                        return True  # Cancelled during pause
+                    await asyncio.sleep(1)
+                # Re-acquire semaphore
+                await self._semaphore.acquire()
+                self._semaphore_released.discard(task_id)
+            except Exception:
+                # Ensure semaphore stays balanced on error
+                if task_id in self._semaphore_released:
+                    await self._semaphore.acquire()
+                    self._semaphore_released.discard(task_id)
+                raise
             await self._transition(task_id, TaskPhase.EXECUTING)
             return False  # Resumed, continue
         return False

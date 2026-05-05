@@ -112,25 +112,32 @@ class TestSubmitAndWait:
         assert result["description"] == "Complete this task"
 
     async def test_submit_and_wait_with_prebuilt_plan(self, temp_db):
-        """When a prebuilt plan is provided from PENDING state, the engine
-        skips plan generation but still reviews. However, the REVIEWING
-        transition is only triggered inside the plan-generation block,
-        so PENDING -> PLANNING fails. This tests the actual behavior:
-        the task fails due to the invalid transition, and _guarded_execute
-        marks it failed."""
+        """When a prebuilt plan is provided, the engine skips plan generation
+        but still transitions through REVIEWING and reviews the plan."""
         provider = MockLLMProvider()
         plan = _simple_plan()
 
-        # Plan review is called (plan exists, no generation needed)
+        # No plan generation (plan already provided)
+        # Plan review
         provider.enqueue(make_plan_review_approved())
+        # Step execution (step_runner calls complete_with_tools)
+        provider.enqueue_tool_response(
+            ToolResponse(content=make_step_completed_response(
+                "Task completed with full analysis results written to output file"
+            ))
+        )
+        # Verification: fresh-eyes (primary) + adversarial (secondary)
+        # verify_deliverable calls _fresh_eyes_review then _adversarial_review
+        provider.enqueue(make_verify_accept())      # fresh-eyes
+        provider.enqueue(make_verify_accept(0.9))   # adversarial
+        # Retrospective
+        provider.enqueue(make_retrospective_response())
 
         _, dispatcher = _build_system(provider, temp_db)
         result = await dispatcher.submit_and_wait("Task with plan", plan=plan)
 
-        # The engine tries PENDING -> PLANNING (skipping REVIEWING)
-        # which is an invalid transition, causing an unhandled error
-        # caught by _guarded_execute -> task fails
-        assert result["current_phase"] == "failed"
+        assert result["current_phase"] == "completed"
+        assert result["verdict"] == "accept"
 
 
 class TestRecoverIncomplete:

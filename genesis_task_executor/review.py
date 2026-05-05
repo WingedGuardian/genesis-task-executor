@@ -185,12 +185,8 @@ def _programmatic_checks(task_description: str, results: list[dict]) -> list[str
         issues.append("No step results produced")
         return issues
 
-    completed = [r for r in results if r.get("status") == "completed"
-                 or r.get("result", {}).get("status") == "completed"
-                 if isinstance(r.get("result"), dict)]
-    if not completed and not any(
-        r.get("status") == "completed" or r.get("result", "") for r in results
-    ):
+    completed = [r for r in results if r.get("status") == "completed"]
+    if not completed:
         issues.append("No steps completed successfully")
 
     # Check for empty results

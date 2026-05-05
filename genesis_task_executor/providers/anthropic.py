@@ -147,18 +147,20 @@ class AnthropicProvider:
 
         response = await self._client.messages.create(**kwargs)
 
-        content = None
+        text_parts: list[str] = []
         tool_calls = []
 
         for block in response.content:
             if hasattr(block, "text"):
-                content = block.text
+                text_parts.append(block.text)
             elif hasattr(block, "type") and block.type == "tool_use":
                 tool_calls.append(ToolCall(
                     id=block.id,
                     name=block.name,
                     arguments=block.input if isinstance(block.input, dict) else {},
                 ))
+
+        content = "\n".join(text_parts) if text_parts else None
 
         return ToolResponse(
             content=content,

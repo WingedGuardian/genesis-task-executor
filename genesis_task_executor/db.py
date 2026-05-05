@@ -106,6 +106,12 @@ async def get_task(db: aiosqlite.Connection, task_id: str) -> dict | None:
     return dict(zip(cols, row, strict=False))
 
 
+_ALLOWED_EXTRA_COLS = frozenset({
+    "plan_json", "blockers", "outputs", "verdict",
+    "confidence", "reason", "finished_at",
+})
+
+
 async def update_task_phase(
     db: aiosqlite.Connection,
     task_id: str,
@@ -116,6 +122,8 @@ async def update_task_phase(
     sets = ["current_phase = ?", "updated_at = ?"]
     vals: list = [phase, _now()]
     for k, v in extra.items():
+        if k not in _ALLOWED_EXTRA_COLS:
+            raise ValueError(f"Disallowed column name: {k!r}")
         sets.append(f"{k} = ?")
         vals.append(v)
     vals.append(task_id)

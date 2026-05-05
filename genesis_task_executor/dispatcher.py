@@ -37,6 +37,7 @@ class TaskDispatcher:
         self._executor = executor
         self._db = database
         self._dispatched: set[str] = set()
+        self._background_tasks: set[asyncio.Task] = set()
 
     async def submit(
         self,
@@ -66,8 +67,10 @@ class TaskDispatcher:
 
         logger.info("Task %s submitted: %s", task_id, description[:100])
 
-        # Dispatch execution (non-blocking)
-        asyncio.create_task(self._guarded_execute(task_id))
+        # Dispatch execution (non-blocking, prevent GC collection)
+        task = asyncio.create_task(self._guarded_execute(task_id))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
         return task_id
 
@@ -119,7 +122,9 @@ class TaskDispatcher:
                 continue
 
             logger.info("Recovering task %s from phase %s", task_id, phase.value)
-            asyncio.create_task(self._guarded_execute(task_id))
+            task = asyncio.create_task(self._guarded_execute(task_id))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
             recovered += 1
 
         return recovered
